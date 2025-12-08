@@ -1,0 +1,179 @@
+---
+title: "Prediction of aboveground biomass (AGB) in Inner Mongolia grasslands, China"
+author: "Jincheng Yao_#77521491, Jinlin Ning_#15714006"
+subtitle: EAS 648 Final project
+output:
+  html_document:
+    highlight: tango
+    theme: cerulean
+  pdf_document: default
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+#code chunk to put in default settings, like whether other code chunks run/show messages
+knitr::opts_chunk$set(echo = TRUE, 
+                      messages = FALSE)
+
+# Set so that long lines in R will be wrapped:
+knitr::opts_chunk$set(tidy.opts=list(width.cutoff=80), tidy=TRUE)
+#note may need to install and load package "formatR" for this to run. 
+
+options (width = 80)
+
+```
+
+```{r 1}
+library(shiny)
+library(sf)
+library(mapview)
+library(leaflet)
+library(ggplot2)
+library(dplyr)
+
+
+# points data
+pts <- st_read("data/raster/points.shp")
+data <- read.csv("data/csv/attributes.csv")
+
+pts_full <- pts %>%
+  left_join(data, by = "point_id")
+
+
+# research area
+inner_mongolia <- st_read("inner_mongolia.shp")
+```
+
+
+
+```{r 2}
+# ui
+
+ui <- fluidPage(
+  titlePanel("Prediction of aboveground biomass (AGB) in Inner Mongolia grasslands, China"),
+
+  sidebarLayout(
+    sidebarPanel(
+      h4("Data used for modeling"),
+
+      radioButtons("year", "Year:",
+                   choices = c("2021", "2022", "All"),
+                   selected = "All"),
+
+      radioButtons("region", "Region:",
+                   choices = c("Hulunbuir", "Xilin Gol", "All"),
+                   selected = "All"),
+
+      radioButtons("source", "Data level:",
+                   choices = c("UAV", "Landsat-8", "MODIS"),
+                   selected = "MODIS"),
+
+      selectInput("vi", "Year:",
+                  choices = c("NDVI", "KNDVI", "OSAVI", "EVI", "All"),
+                  selected = "All"),
+    ),
+    
+    mainPanel(
+      # Mapview map
+      fluidRow(
+        column(
+          width = 12,
+          leafletOutput("map", height = "500px")
+        )
+      ),
+
+      # information
+      fluidRow(
+        # ploting
+        column(
+          width = 6,
+          plotOutput("scatter", height = "300px")
+        ),
+        # statistic discribe
+        column(
+          width = 6,
+          tableOutput("stats")
+        )
+      )
+    )
+  )
+)
+
+
+# service
+
+server <- function(input, output, session) {
+  # select data
+  filtered_data <- reactive({
+    df <- agbd_all
+    if (input$year != "All") df <- df %>% filter(year == input$year)
+    if (input$region != "All") df <- df %>% filter(region == input$region)
+    if (input$vi != "All") df <- df %>% filter(vi == input$vi)
+    df <- df %>% filter(source == input$source)
+    return(df)
+  })
+
+  # mapview map
+  output$map <- renderLeaflet({
+    df <- filtered_data()
+    pal <- colorNumeric("YlGn", df$AGB)
+
+    leaflet() %>%
+      addTiles() %>%
+      addPolygons(data = inner_mongolia, fill = FALSE, color = "black", weight = 2) %>%
+      addCircleMarkers(
+        data = df,
+        lng = ~lon,
+        lat = ~lat,
+        radius = 5,
+        fillColor = ~pal(AGB),
+        color = "white",
+        fillOpacity = 0.8,
+        popup = ~paste("AGB:", round(AGB, 2),
+                       "<br>NDVI:", round(NDVI, 3),
+                       "<br>source:", source)
+      )
+  })
+
+  # scatter plot for model
+  output$scatter <- renderPlot({
+
+    df <- filtered_data()
+    vi_col <- input$vi
+
+    ggplot(df, aes_string(x = vi_col, y = "AGB", color = "source")) +
+      geom_point(alpha = 0.7) +
+      geom_smooth(method = "lm") +
+      theme_bw() +
+      labs(title = paste("AGB ~", vi_col))
+  })
+
+  #statistic description
+  output$stats <- renderTable({
+
+    df <- filtered_data()
+    if (nrow(df) < 5) return(NULL)
+
+    formula <- as.formula(paste("AGB ~", input$vi))
+    fit <- lm(formula, data = df)
+
+    data.frame(
+      description = c("intercept", "slope", "R square", "RMSE"),
+      value = c(
+        coef(fit)[1],
+        coef(fit)[2],
+        summary(fit)$r.squared,
+        sqrt(mean(fit$residuals^2))
+      )
+    )
+  })
+}
+
+
+```
+
+```{r 3}
+# run
+shinyApp(ui, server)
+```
