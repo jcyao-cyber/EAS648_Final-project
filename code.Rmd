@@ -34,48 +34,60 @@ library(dplyr)
 
 
 # points data
-pts <- st_read("data/raster/points.shp")
 data <- read.csv("data/csv/attributes.csv")
 
-pts_full <- pts %>%
-  left_join(data, by = "point_id")
+data$Region <- dplyr::recode(data$Region,
+                             "H" = "Hulunbuir",
+                             "X" = "Xilin Gol")
 
+pts_full <- st_as_sf(
+  data,
+  coords = c("Longtitude", "Latitude"),
+  crs = 4326,
+  remove = FALSE
+)
+
+# data source
+source_map <- list(
+  "UAV" = "UAV",
+  "Landsat-8" = "L8",
+  "MODIS" = "MOD"
+)
+vi_list <- c("NDVI", "KNDVI", "EVI", "OSAVI")
 
 # research area
-inner_mongolia <- st_read("inner_mongolia.shp")
+inner_mongolia <- st_read("data/raster/inner_mongolia.shp")
 ```
 
 
 
 ```{r 2}
 # ui
-
 ui <- fluidPage(
-  titlePanel("Prediction of aboveground biomass (AGB) in Inner Mongolia grasslands, China"),
+
+  titlePanel("Prediction of Aboveground Biomass (AGB) in Inner Mongolia Grasslands, China"),
 
   sidebarLayout(
+
     sidebarPanel(
-      h4("Data used for modeling"),
 
-      radioButtons("year", "Year:",
-                   choices = c("2021", "2022", "All"),
+      h4("Data Used for Modeling"),
+      radioButtons("year", "Year:", 
+                   choices = c("2021", "2022", "All"), 
                    selected = "All"),
-
-      radioButtons("region", "Region:",
-                   choices = c("Hulunbuir", "Xilin Gol", "All"),
+      radioButtons("region", "Region:", 
+                   choices = c("Hulunbuir", "Xilin Gol", "All"), 
                    selected = "All"),
-
-      radioButtons("source", "Data level:",
-                   choices = c("UAV", "Landsat-8", "MODIS"),
+      radioButtons("source", "Data Level:", 
+                   choices = c("UAV", "Landsat-8", "MODIS"), 
                    selected = "MODIS"),
-
-      selectInput("vi", "Year:",
-                  choices = c("NDVI", "KNDVI", "OSAVI", "EVI", "All"),
-                  selected = "All"),
+      selectInput("vi", "Vegetation Index:", 
+                  choices = c("NDVI", "KNDVI", "OSAVI", "EVI", "All"), 
+                  selected = "All")
     ),
-    
+
     mainPanel(
-      # Mapview map
+      # Map (top)
       fluidRow(
         column(
           width = 12,
@@ -83,14 +95,14 @@ ui <- fluidPage(
         )
       ),
 
-      # information
       fluidRow(
-        # ploting
+        # scatter plot
         column(
           width = 6,
           plotOutput("scatter", height = "300px")
         ),
-        # statistic discribe
+
+        # statistics summary
         column(
           width = 6,
           tableOutput("stats")
@@ -102,71 +114,91 @@ ui <- fluidPage(
 
 
 # service
-
 server <- function(input, output, session) {
-  # select data
+
+  # dealing with VI name
+  active_vi_field <- reactive({
+    if (input$vi == "All") return(NULL)
+    paste0(input$vi, source_map[[input$source]])
+  })
+
+  # filter data
   filtered_data <- reactive({
-    df <- agbd_all
-    if (input$year != "All") df <- df %>% filter(year == input$year)
-    if (input$region != "All") df <- df %>% filter(region == input$region)
-    if (input$vi != "All") df <- df %>% filter(vi == input$vi)
-    df <- df %>% filter(source == input$source)
-    return(df)
-  })
+    df <- pts_full
+    if (input$year != "All") df <- df %>% filter(Year == input$year)
+    if (input$region != "All") df <- df %>% filter(Region == input$region)
+    vi_col <- active_vi_field()
+    
+    if (!is.null(vi_col) && vi_col %in% names(df)){
+      df <- df %>% filter(!is.na(.data[[vi_col]]))
+      }
+    df
+    })
 
-  # mapview map
+  # mapping
   output$map <- renderLeaflet({
-    df <- filtered_data()
-    pal <- colorNumeric("YlGn", df$AGB)
 
-    leaflet() %>%
-      addTiles() %>%
-      addPolygons(data = inner_mongolia, fill = FALSE, color = "black", weight = 2) %>%
-      addCircleMarkers(
-        data = df,
-        lng = ~lon,
-        lat = ~lat,
-        radius = 5,
-        fillColor = ~pal(AGB),
-        color = "white",
-        fillOpacity = 0.8,
-        popup = ~paste("AGB:", round(AGB, 2),
-                       "<br>NDVI:", round(NDVI, 3),
-                       "<br>source:", source)
-      )
+    df <- filtered_data()
+    vi_col <- active_vi_field()
+
+    pal <- colorNumeric("YlGn", df$AGB)
+    
+    if (is.null(vi_col) || !(vi_col %in% names(df))) {
+      popup_txt <- paste0("Point: ", df$point, "<br>",
+                          "AGB: ", round(df$AGB, 2), "<br>",
+                          "VI: All<br>",
+                          "Source: ", input$source)
+      } else {
+        popup_txt <- paste0("Point: ", df$point, "<br>",
+                            "AGB: ", round(df$AGB, 2), "<br>",
+                            input$vi, ": ", round(df[[vi_col]], 3), "<br>",
+                            "Source: ", input$source)
+        }
+
+    leaflet(df) %>% 
+      addTiles() %>% 
+      addPolygons(data = inner_mongolia, 
+                  fill = FALSE, 
+                  color = "black", 
+                  weight = 2) %>% 
+      addCircleMarkers(lng = ~Longtitude, 
+                       lat = ~Latitude, 
+                       radius = 5, 
+                       fillColor = ~pal(AGB), 
+                       fillOpacity = 0.8, 
+                       stroke = TRUE, 
+                       color = "white", 
+                       popup = popup_txt)
   })
 
-  # scatter plot for model
+  # scatter plot
   output$scatter <- renderPlot({
-
+    req(input$vi != "All")
     df <- filtered_data()
-    vi_col <- input$vi
-
-    ggplot(df, aes_string(x = vi_col, y = "AGB", color = "source")) +
-      geom_point(alpha = 0.7) +
+    vi_col <- active_vi_field()
+    req(vi_col %in% names(df))
+    ggplot(df, aes(x = .data[[vi_col]], y = AGB)) +
+      geom_point(alpha = 0.7, color = "darkgreen") +
       geom_smooth(method = "lm") +
       theme_bw() +
-      labs(title = paste("AGB ~", vi_col))
-  })
+      labs(title = paste("AGB ~", input$vi, "(", input$source, ")"))
+    })
 
-  #statistic description
+  # statistic
   output$stats <- renderTable({
-
+    req(input$vi != "All")
     df <- filtered_data()
-    if (nrow(df) < 5) return(NULL)
-
-    formula <- as.formula(paste("AGB ~", input$vi))
-    fit <- lm(formula, data = df)
-
+    vi_col <- active_vi_field()
+    req(vi_col %in% names(df))
+    fit <- lm(as.formula(paste("AGB ~", vi_col)), data = df)
     data.frame(
-      description = c("intercept", "slope", "R square", "RMSE"),
-      value = c(
-        coef(fit)[1],
-        coef(fit)[2],
-        summary(fit)$r.squared,
-        sqrt(mean(fit$residuals^2))
+      description = c("intercept", "slope", "R square", "RMSE", "n"),
+      value = c(coef(fit)[1],
+                coef(fit)[2],
+                summary(fit)$r.squared,
+                sqrt(mean(fit$residuals^2)),
+                nrow(df))
       )
-    )
   })
 }
 
