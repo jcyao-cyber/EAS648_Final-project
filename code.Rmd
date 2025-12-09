@@ -51,7 +51,7 @@ pts_full <- st_as_sf(
 source_map <- list(
   "UAV" = "UAV",
   "Landsat-8" = "L8",
-  "MODIS" = "MOD"
+  "MODIS" = "MODIS"
 )
 vi_list <- c("NDVI", "KNDVI", "EVI", "OSAVI")
 
@@ -82,8 +82,8 @@ ui <- fluidPage(
                    choices = c("UAV", "Landsat-8", "MODIS"), 
                    selected = "MODIS"),
       selectInput("vi", "Vegetation Index:", 
-                  choices = c("NDVI", "KNDVI", "OSAVI", "EVI", "All"), 
-                  selected = "All")
+                  choices = c("NDVI", "KNDVI", "OSAVI", "EVI"), 
+                  selected = "NDVI")
     ),
 
     mainPanel(
@@ -111,6 +111,23 @@ ui <- fluidPage(
     )
   )
 )
+```
+
+```{r 3}
+# Defining the column name
+vi_map <- list("UAV" = list("NDVI" = "NDVIUAV",
+                            "KNDVI" = "KNDVIUAV",
+                            "EVI" = "EVIUAV",
+                            "OSAVI" = "OSAVIUAV"),
+               "Landsat-8" = list("NDVI" = "NDVIL8",
+                                  "KNDVI" = "KNDVIL8",
+                                  "EVI" = "EVIL8",
+                                  "OSAVI" = "OSAVIL8"),
+               "MODIS" = list("NDVI" = "NDVIMODIS",
+                              "KNDVI" = "KNDVIMODIS",
+                              "EVI" = "EVIMODIS",
+                              "OSAVI" = "OSAVIMODIS"))
+
 
 
 # service
@@ -119,8 +136,8 @@ server <- function(input, output, session) {
   # dealing with VI name
   active_vi_field <- reactive({
     if (input$vi == "All") return(NULL)
-    paste0(input$vi, source_map[[input$source]])
-  })
+    vi_map[[input$source]][[input$vi]]
+    })
 
   # filter data
   filtered_data <- reactive({
@@ -205,7 +222,7 @@ server <- function(input, output, session) {
 
 ```
 
-```{r 3}
+```{r 4}
 # run
 shinyApp(ui, server)
 ```
