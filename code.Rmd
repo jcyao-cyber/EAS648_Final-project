@@ -56,7 +56,7 @@ source_map <- list(
 vi_list <- c("NDVI", "KNDVI", "EVI", "OSAVI")
 
 # research area
-inner_mongolia <- st_read("data/raster/inner_mongolia.shp")
+inner_mongolia <- st_read("data/raster/inn.shp")
 ```
 
 
